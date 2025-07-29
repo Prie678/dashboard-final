@@ -46268,7 +46268,7 @@
                     wasteKg: Math.abs(parseFloat(row["Waste_Total @Kg"] || 0)),
                     materialUsed: materialUsed
                 };
-            }).filter(Boolean);
+            }).filter(d => d && d.year && d.month);
             document.getElementById('dataQuality').textContent = `${validRows} valid, ${invalidRows} invalid`;
             return processed;
         }
@@ -46316,20 +46316,7 @@
             updateAllCharts(currentAnalysis);
             populateTable();
         }
-
-        function updateMetrics(customers) {
-            const totalWaste = customers.reduce((sum, c) => sum + c.totalWaste, 0);
-            const totalMaterial = customers.reduce((sum, c) => sum + c.totalMaterial, 0);
-            const wastePercent = totalMaterial > 0 ? (totalWaste / totalMaterial) * 100 : 0;
-            
-            document.getElementById('totalWaste').textContent = Math.round(totalWaste).toLocaleString('id-ID');
-            document.getElementById('totalMaterialUsed').textContent = Math.round(totalMaterial).toLocaleString('id-ID');
-            document.getElementById('wasteBottomLine').textContent = wastePercent.toFixed(2) + '%';
-            document.getElementById('totalCustomers').textContent = customers.length;
-            document.getElementById('recordCount').textContent = fullData.length + " Records";
-            document.getElementById('lastUpdated').textContent = new Date().toLocaleString('id-ID');
-        }
-
+        
         function populateTable() {
             const customerFilter = document.getElementById('customerFilter').value.toLowerCase();
             const statusFilter = document.getElementById('statusFilter').value;
@@ -46350,6 +46337,19 @@
                 </tr>
             `).join('');
         }
+
+        function updateMetrics(customers) {
+            const totalWaste = customers.reduce((sum, c) => sum + c.totalWaste, 0);
+            const totalMaterial = customers.reduce((sum, c) => sum + c.totalMaterial, 0);
+            const wastePercent = totalMaterial > 0 ? (totalWaste / totalMaterial) * 100 : 0;
+            
+            document.getElementById('totalWaste').textContent = Math.round(totalWaste).toLocaleString('id-ID');
+            document.getElementById('totalMaterialUsed').textContent = Math.round(totalMaterial).toLocaleString('id-ID');
+            document.getElementById('wasteBottomLine').textContent = wastePercent.toFixed(2) + '%';
+            document.getElementById('totalCustomers').textContent = customers.length;
+            document.getElementById('recordCount').textContent = fullData.length + " Records";
+            document.getElementById('lastUpdated').textContent = new Date().toLocaleString('id-ID');
+        }
         
         function updateAllCharts(analysis) {
             createTop10Chart(analysis.customers);
@@ -46361,19 +46361,50 @@
             const ctx = document.getElementById('top10WasteChart');
             if(charts.has('top10')) charts.get('top10').destroy();
 
-            const top10 = [...customers].sort((a,b) => b.totalMaterial - a.totalMaterial).slice(0,10);
+            const sorted = [...customers].sort((a,b) => b.totalMaterial - a.totalMaterial);
+            const top10 = sorted.slice(0,10);
+            const others = sorted.slice(10);
+            let chartData = [...top10];
+
+            if(others.length > 0) {
+                const othersData = others.reduce((acc, c) => {
+                    acc.totalMaterial += c.totalMaterial;
+                    acc.totalWaste += c.totalWaste;
+                    return acc;
+                }, { customer: 'Others', totalMaterial: 0, totalWaste: 0 });
+                othersData.wastePercent = othersData.totalMaterial > 0 ? (othersData.totalWaste / othersData.totalMaterial) * 100 : 0;
+                chartData.push(othersData);
+            }
+            
+            const maxWastePercent = Math.max(...chartData.map(d => d.wastePercent));
+            const percentageScale = Math.ceil(maxWastePercent / 5) * 5 || 5;
+
             const chart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: top10.map(d => d.customer),
+                    labels: chartData.map(d => d.customer),
                     datasets: [
-                        { label: 'Total Bahan Baku (Kg)', data: top10.map(d => d.totalMaterial), backgroundColor: 'rgba(52, 152, 219, 0.8)' },
-                        { label: 'Total Waste (Kg)', data: top10.map(d => d.totalWaste), backgroundColor: 'rgba(231, 76, 60, 0.8)' }
+                        { label: 'Total Bahan Baku (Kg)', data: chartData.map(d => d.totalMaterial), backgroundColor: 'rgba(52, 152, 219, 0.8)', order: 2, xAxisID: 'x' },
+                        { label: 'Total Waste (Kg)', data: chartData.map(d => d.totalWaste), backgroundColor: 'rgba(231, 76, 60, 0.8)', order: 2, xAxisID: 'x' },
+                        { type: 'scatter', label: 'Waste Percentage (%)', data: chartData.map(d => d.wastePercent), backgroundColor: 'rgba(241, 196, 15, 1)', order: 1, xAxisID: 'x2', pointRadius: 6, pointHoverRadius: 8 }
                     ]
                 },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, ticks: {color: '#e0e0e0'}}, y: { stacked: true, ticks: {color: '#e0e0e0'} } }, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { stacked: false, beginAtZero: true, position: 'bottom', title: { display: true, text: 'Material Usage (Kg)', color: '#e0e0e0' }, ticks: { color: '#e0e0e0' } },
+                        x2: { beginAtZero: true, max: percentageScale, position: 'top', title: { display: true, text: 'Waste Percentage (%)', color: '#f1c40f' }, ticks: { color: '#f1c40f', callback: v => v + '%' }, grid: { drawOnChartArea: false } },
+                        y: { stacked: false, ticks: { color: '#e0e0e0' } }
+                    },
+                    plugins: { legend: { position: 'top', labels: { color: '#e0e0e0', usePointStyle: true } } }
+                }
             });
             charts.set('top10', chart);
+            const totalWaste = customers.reduce((s,c) => s + c.totalWaste, 0);
+            const totalMaterial = customers.reduce((s,c) => s + c.totalMaterial, 0);
+            const bottomLine = totalMaterial > 0 ? (totalWaste / totalMaterial) * 100 : 0;
+            document.getElementById('dynamicBottomLineWaste').textContent = `Total Bottom Line Waste: ${bottomLine.toFixed(2)}% | Others mencakup customer selain Top 10`;
         }
 
         function createDistributionChart(customers) {
