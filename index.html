@@ -46256,15 +46256,19 @@
                 return {
                     customer: (row.CUSTOMER || 'Unknown').trim(),
                     year: parseInt(row.Tahun),
+                    month: parseInt(row["Bulan OK"]),
                     wasteKg: Math.abs(parseFloat(row["Waste_Total @Kg"] || 0)),
                     materialUsed: materialUsed
                 };
-            }).filter(Boolean);
+            }).filter(d => d && d.year && d.month);
         }
 
         function analyzeData(data) {
             const customerAnalysis = {};
+            const monthlyTrends = {};
+
             data.forEach(row => {
+                // Customer Aggregation
                 if (!customerAnalysis[row.customer]) {
                     customerAnalysis[row.customer] = { customer: row.customer, totalWaste: 0, totalMaterial: 0, records: 0 };
                 }
@@ -46272,12 +46276,27 @@
                 cust.totalWaste += row.wasteKg;
                 cust.totalMaterial += row.materialUsed;
                 cust.records++;
-            });
 
-            return Object.values(customerAnalysis).map(c => ({
+                // Monthly Trend Aggregation
+                const monthKey = `${row.year}-${String(row.month).padStart(2, '0')}`;
+                if(!monthlyTrends[monthKey]) {
+                    monthlyTrends[monthKey] = { year: row.year, month: row.month, totalWaste: 0, totalMaterial: 0 };
+                }
+                monthlyTrends[monthKey].totalWaste += row.wasteKg;
+                monthlyTrends[monthKey].totalMaterial += row.materialUsed;
+            });
+            
+            const analyzedCustomers = Object.values(customerAnalysis).map(c => ({
                 ...c,
                 wastePercent: c.totalMaterial > 0 ? (c.totalWaste / c.totalMaterial) * 100 : 0
             }));
+
+            const analyzedTrends = Object.values(monthlyTrends).map(m => ({
+                ...m,
+                wastePercent: m.totalMaterial > 0 ? (m.totalWaste / m.totalMaterial) * 100 : 0
+            })).sort((a,b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
+
+            return { customers: analyzedCustomers, trends: analyzedTrends };
         }
         
         function updateDashboard() {
@@ -46285,29 +46304,29 @@
             const filteredData = year ? fullData.filter(d => d.year == year) : fullData;
             currentAnalysis = analyzeData(filteredData);
             
-            updateMetrics(currentAnalysis);
+            updateMetrics(currentAnalysis.customers);
             updateAllCharts(currentAnalysis);
-            populateTable(currentAnalysis);
+            populateTable(currentAnalysis.customers);
         }
 
-        function updateMetrics(analysis) {
-            const totalWaste = analysis.reduce((sum, c) => sum + c.totalWaste, 0);
-            const totalMaterial = analysis.reduce((sum, c) => sum + c.totalMaterial, 0);
+        function updateMetrics(customers) {
+            const totalWaste = customers.reduce((sum, c) => sum + c.totalWaste, 0);
+            const totalMaterial = customers.reduce((sum, c) => sum + c.totalMaterial, 0);
             const wastePercent = totalMaterial > 0 ? (totalWaste / totalMaterial) * 100 : 0;
             
             document.getElementById('totalWaste').textContent = Math.round(totalWaste).toLocaleString('id-ID');
             document.getElementById('totalMaterialUsed').textContent = Math.round(totalMaterial).toLocaleString('id-ID');
             document.getElementById('wasteBottomLine').textContent = wastePercent.toFixed(2) + '%';
-            document.getElementById('totalCustomers').textContent = analysis.length;
+            document.getElementById('totalCustomers').textContent = customers.length;
             document.getElementById('recordCount').textContent = fullData.length + " Records";
             document.getElementById('lastUpdated').textContent = new Date().toLocaleString('id-ID');
         }
 
-        function populateTable(analysis) {
+        function populateTable(customers) {
             const customerFilter = document.getElementById('customerFilter').value.toLowerCase();
             const statusFilter = document.getElementById('statusFilter').value;
             
-            const filtered = analysis.filter(c => {
+            const filtered = customers.filter(c => {
                 const status = getStatus(c.wastePercent);
                 return c.customer.toLowerCase().includes(customerFilter) && (!statusFilter || status === statusFilter);
             });
@@ -46325,15 +46344,16 @@
         }
         
         function updateAllCharts(analysis) {
-            createTop10Chart(analysis);
-            createDistributionChart(analysis);
+            createTop10Chart(analysis.customers);
+            createDistributionChart(analysis.customers);
+            createMonthlyWasteTrendChart(analysis.trends);
         }
 
-        function createTop10Chart(analysis) {
+        function createTop10Chart(customers) {
             const ctx = document.getElementById('top10WasteChart');
             if(charts.has('top10')) charts.get('top10').destroy();
 
-            const top10 = [...analysis].sort((a,b) => b.totalMaterial - a.totalMaterial).slice(0,10);
+            const top10 = [...customers].sort((a,b) => b.totalMaterial - a.totalMaterial).slice(0,10);
             const chart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -46343,17 +46363,17 @@
                         { label: 'Total Waste (Kg)', data: top10.map(d => d.totalWaste), backgroundColor: 'rgba(231, 76, 60, 0.8)' }
                     ]
                 },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
             });
             charts.set('top10', chart);
         }
 
-        function createDistributionChart(analysis) {
+        function createDistributionChart(customers) {
             const ctx = document.getElementById('distributionChart');
             if(charts.has('dist')) charts.get('dist').destroy();
 
             const categories = { 'Excellent': 0, 'Good': 0, 'Average': 0, 'High': 0, 'Critical': 0 };
-            analysis.forEach(c => categories[getStatus(c.wastePercent)]++);
+            customers.forEach(c => categories[getStatus(c.wastePercent)]++);
             
             const chart = new Chart(ctx, {
                 type: 'doughnut',
@@ -46361,9 +46381,32 @@
                     labels: Object.keys(categories),
                     datasets: [{ data: Object.values(categories), backgroundColor: ['#27ae60', '#3498db', '#f1c40f', '#e67e22', '#e74c3c'] }]
                 },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'bottom' } } }
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'bottom', labels: {color: '#e0e0e0'} } } }
             });
             charts.set('dist', chart);
+        }
+
+        function createMonthlyWasteTrendChart(trends) {
+            const ctx = document.getElementById('monthlyWasteTrendChart');
+            if(charts.has('monthly')) charts.get('monthly').destroy();
+
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const labels = trends.map(t => `${monthNames[t.month - 1]} ${t.year}`);
+            const data = trends.map(t => t.wastePercent);
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Waste Percentage (%)', data: data,
+                        borderColor: 'rgba(75, 192, 192, 1)', backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderWidth: 2, tension: 0.3, fill: true
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { color: '#e0e0e0' } }, x: { ticks: { color: '#e0e0e0' } } } }
+            });
+            charts.set('monthly', chart);
         }
 
         function getStatus(p) {
@@ -46374,23 +46417,26 @@
         
         function populateYearFilter() {
             const yearFilter = document.getElementById('yearFilter');
+            yearFilter.innerHTML = '<option value="">All Years</option>';
             const years = [...new Set(fullData.map(d => d.year))].sort((a,b) => b-a);
             years.forEach(y => yearFilter.add(new Option(y, y)));
         }
 
-        // Main execution
+        // --- Main execution ---
         try {
-            if (!embeddedData || embeddedData.length === 0) throw new Error("Data JSON belum dimasukkan.");
+            if (!embeddedData || embeddedData.length === 0 || typeof embeddedData[0] !== 'object') {
+                throw new Error("Data JSON belum dimasukkan atau formatnya salah.");
+            }
             fullData = processRawData(embeddedData);
             populateYearFilter();
             updateDashboard();
 
             document.getElementById('yearFilter').addEventListener('change', updateDashboard);
-            document.getElementById('customerFilter').addEventListener('input', () => populateTable(currentAnalysis));
-            document.getElementById('statusFilter').addEventListener('change', () => populateTable(currentAnalysis));
+            document.getElementById('customerFilter').addEventListener('input', () => populateTable(currentAnalysis.customers));
+            document.getElementById('statusFilter').addEventListener('change', () => populateTable(currentAnalysis.customers));
 
         } catch (e) {
-            document.body.innerHTML = `<h1>Error: ${e.message}</h1>`;
+            document.body.innerHTML = `<h1 style="text-align: center; margin-top: 50px; color: #e74c3c;">Error: ${e.message}</h1>`;
             console.error(e);
         }
     });
