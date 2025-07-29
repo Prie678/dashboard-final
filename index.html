@@ -46250,17 +46250,27 @@
         let charts = new Map();
 
         function processRawData(rawData) {
-            return rawData.map(row => {
+            let validRows = 0, invalidRows = 0;
+            const processed = rawData.map(row => {
                 const materialUsed = parseFloat(row["PEMAKAIAN BAHAN BAKU"]);
-                if (!materialUsed || isNaN(materialUsed) || materialUsed <= 0) return null;
+                const year = parseInt(row.Tahun);
+                const month = parseInt(row["Bulan OK"]);
+
+                if (!materialUsed || isNaN(materialUsed) || materialUsed <= 0 || !year || !month) {
+                    invalidRows++;
+                    return null;
+                }
+                validRows++;
                 return {
                     customer: (row.CUSTOMER || 'Unknown').trim(),
-                    year: parseInt(row.Tahun),
-                    month: parseInt(row["Bulan OK"]),
+                    year: year,
+                    month: month,
                     wasteKg: Math.abs(parseFloat(row["Waste_Total @Kg"] || 0)),
                     materialUsed: materialUsed
                 };
-            }).filter(d => d && d.year && d.month);
+            }).filter(Boolean);
+            document.getElementById('dataQuality').textContent = `${validRows} valid, ${invalidRows} invalid`;
+            return processed;
         }
 
         function analyzeData(data) {
@@ -46268,7 +46278,6 @@
             const monthlyTrends = {};
 
             data.forEach(row => {
-                // Customer Aggregation
                 if (!customerAnalysis[row.customer]) {
                     customerAnalysis[row.customer] = { customer: row.customer, totalWaste: 0, totalMaterial: 0, records: 0 };
                 }
@@ -46277,7 +46286,6 @@
                 cust.totalMaterial += row.materialUsed;
                 cust.records++;
 
-                // Monthly Trend Aggregation
                 const monthKey = `${row.year}-${String(row.month).padStart(2, '0')}`;
                 if(!monthlyTrends[monthKey]) {
                     monthlyTrends[monthKey] = { year: row.year, month: row.month, totalWaste: 0, totalMaterial: 0 };
@@ -46306,7 +46314,7 @@
             
             updateMetrics(currentAnalysis.customers);
             updateAllCharts(currentAnalysis);
-            populateTable(currentAnalysis.customers);
+            populateTable();
         }
 
         function updateMetrics(customers) {
@@ -46322,11 +46330,11 @@
             document.getElementById('lastUpdated').textContent = new Date().toLocaleString('id-ID');
         }
 
-        function populateTable(customers) {
+        function populateTable() {
             const customerFilter = document.getElementById('customerFilter').value.toLowerCase();
             const statusFilter = document.getElementById('statusFilter').value;
             
-            const filtered = customers.filter(c => {
+            const filtered = currentAnalysis.customers.filter(c => {
                 const status = getStatus(c.wastePercent);
                 return c.customer.toLowerCase().includes(customerFilter) && (!statusFilter || status === statusFilter);
             });
@@ -46363,7 +46371,7 @@
                         { label: 'Total Waste (Kg)', data: top10.map(d => d.totalWaste), backgroundColor: 'rgba(231, 76, 60, 0.8)' }
                     ]
                 },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, ticks: {color: '#e0e0e0'}}, y: { stacked: true, ticks: {color: '#e0e0e0'} } }, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
             });
             charts.set('top10', chart);
         }
@@ -46432,8 +46440,8 @@
             updateDashboard();
 
             document.getElementById('yearFilter').addEventListener('change', updateDashboard);
-            document.getElementById('customerFilter').addEventListener('input', () => populateTable(currentAnalysis.customers));
-            document.getElementById('statusFilter').addEventListener('change', () => populateTable(currentAnalysis.customers));
+            document.getElementById('customerFilter').addEventListener('input', () => populateTable());
+            document.getElementById('statusFilter').addEventListener('change', () => populateTable());
 
         } catch (e) {
             document.body.innerHTML = `<h1 style="text-align: center; margin-top: 50px; color: #e74c3c;">Error: ${e.message}</h1>`;
