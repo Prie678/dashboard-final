@@ -46218,12 +46218,13 @@
 
             function processData(data) {
                 return data.map(row => {
-                    const materialUsed = parseFloat(row['  PEMAKAIAN BAHAN BAKU ']);
+                    // FIXED: Using exact keys from your JSON screenshot
+                    const materialUsed = parseFloat(row["PEMAKAIAN BAHAN BAKU"]);
                     if (!materialUsed || isNaN(materialUsed) || materialUsed <= 0) return null;
                     return {
                         customer: (row.CUSTOMER || 'Unknown').trim(),
                         materialUsed: materialUsed,
-                        wasteKg: Math.abs(parseFloat(row['  Waste_Total @Kg '] || 0))
+                        wasteKg: Math.abs(parseFloat(row["Waste_Total @Kg"] || 0))
                     };
                 }).filter(Boolean);
             }
@@ -46286,15 +46287,15 @@
                             {
                                 label: 'Total Material (Kg)',
                                 data: top10.map(c => c.totalMaterial),
-                                backgroundColor: 'rgba(52, 152, 219, 0.8)',
-                                yAxisID: 'y'
+                                backgroundColor: 'rgba(52, 152, 219, 0.8)'
                             },
                             {
                                 label: 'Waste %',
                                 data: top10.map(c => c.wastePercent),
                                 type: 'line',
                                 borderColor: 'rgba(241, 196, 15, 1)',
-                                yAxisID: 'y1'
+                                yAxisID: 'y1',
+                                borderWidth: 2
                             }
                         ]
                     },
@@ -46314,7 +46315,7 @@
 
             // Inisialisasi
             try {
-                 if (!embeddedData || embeddedData.length === 0) {
+                 if (!embeddedData || embeddedData.length === 0 || (Array.isArray(embeddedData) && embeddedData[0] === '/* <<< PASTE DATA JSON ANDA DI SINI >>> */')) {
                     throw new Error("Data tidak ditemukan. Pastikan Anda sudah paste data JSON.");
                 }
                 fullData = processData(embeddedData);
@@ -46326,7 +46327,7 @@
 
                 document.getElementById('customerFilter').addEventListener('input', () => renderTable(analyzedData));
             } catch (error) {
-                document.body.innerHTML = `<div style="padding: 50px; text-align: center; font-size: 1.5em;"><h1>Error</h1><p>${error.message}</p></div>`;
+                document.body.innerHTML = `<div style="padding: 50px; text-align: center; font-size: 1.5em; color: #e74c3c;"><h1>Error</h1><p>${error.message}</p></div>`;
                 console.error(error);
             }
         });
